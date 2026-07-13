@@ -20,7 +20,7 @@ const app = express();
 
 // 1. UPDATED CORS: Only allow your Netlify domain
 const corsOptions = {
-    origin: 'https://meeraartsystem.netlify.app', // Only your frontend can access this
+    origin: 'https://meeraartmanagement.netlify.app', // Only your frontend can access this
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true
 };
