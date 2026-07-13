@@ -665,7 +665,7 @@ let currentView = 'dashboard';
 // It defaults to localhost for testing, but can be overridden
 const API_BASE = window.location.hostname === 'localhost' 
     ? 'http://localhost:3000/api' 
-    : '/api';
+    : 'mysql://root:HSGsFJKjMYpPyckKsQiiIVQAYAKSdHbZ@tokaido.proxy.rlwy.net:19238/railway/api';
 
 let modalCtx = null; // {moduleKey, id}
 let searchState = {}; // moduleKey -> {q, filter}
@@ -1286,7 +1286,7 @@ function renderArtworkCard(a){
   </div>`;
 }
 
-async function onDropArtwork(e, col){
+async function onDropArtwork(e, col) {
   e.preventDefault();
   e.currentTarget.classList.remove('drag-over');
   
@@ -1299,15 +1299,15 @@ async function onDropArtwork(e, col){
     renderTasksView();
 
     try {
-      // 1. Send the updated status directly to MySQL!
-      await fetch(`http://localhost:3000/api/artworks/${id}`, {
+      // 1. Send the updated status to the backend using the dynamic API_BASE
+      await fetch(`${API_BASE}/artworks/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(artwork)
       });
       
-      // 2. Fetch the fresh database state just to be safe
-      const response = await fetch("http://localhost:3000/api/artworks");
+      // 2. Fetch the fresh database state
+      const response = await fetch(`${API_BASE}/artworks`);
       DB.artworks = await response.json();
       
       toast(`Moved to ${col}`);
@@ -1719,179 +1719,54 @@ function reverseAdvanceRecovery(applied){
 // }
 
 // read the editable inputs for a row from the DOM
-function readPayrollRow(staffId){
-  const g = id => { const el=document.getElementById(id); return el?(Number(el.value)||0):null; };
-  return {
-    base: g('pay_base_'+staffId) ?? 0,
-    bonus: g('pay_bonus_'+staffId) ?? 0,
-    deductions: g('pay_ded_'+staffId) ?? 0,
-    advance: g('pay_adv_'+staffId) ?? 0,
-  };
-}
-function recalcRow(staffId){
-  const {base,bonus,deductions,advance} = readPayrollRow(staffId);
-  const cell = document.getElementById('net_'+staffId);
-  if(cell) cell.textContent = fmtMoney(computeNet(base,bonus,deductions,advance));
-  recalcPayrollTotals();
-}
-function recalcPayrollTotals(){
-  const active = (DB.staff||[]).filter(s=>s.status==='Active');
-  let payable=0, paid=0, pending=0;
-  active.forEach(s=>{
-    const rec = getSalaryRecord(s.id, payrollMonth);
-    let net;
-    if(rec && rec.status==='Paid'){ net = rec.net; paid += net; }
-    else { const r = readPayrollRow(s.id); net = computeNet(r.base,r.bonus,r.deductions,r.advance); pending += net; }
-    payable += net;
-  });
-  const set = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent = fmtMoney(v); };
-  set('pr_payable', payable); set('pr_paid', paid); set('pr_pending', pending);
-}
-function persistRow(staffId){
-  const {base,bonus,deductions,advance} = readPayrollRow(staffId);
-  upsertSalary(staffId, {base,bonus,deductions,advance});
-  recalcPayrollTotals();
-}
+async function paySalary(staffId) {
+    const staff = DB.staff.find(s => Number(s.id) === Number(staffId));
+    if (!staff) return;
 
-async function paySalary(staffId){
-
-    const staff = DB.staff.find(
-        s => Number(s.id) === Number(staffId)
-    );
-
-    if(!staff) return;
-
-    const {
-
-        base,
-        bonus,
-        deductions,
-        advance
-
-    } = readPayrollRow(staffId);
-
-    const net = computeNet(
-
-        base,
-
-        bonus,
-
-        deductions,
-
-        advance
-
-    );
+    const { base, bonus, deductions, advance } = readPayrollRow(staffId);
+    const net = computeNet(base, bonus, deductions, advance);
 
     const d = new Date(payrollMonth + "-01");
-
-    const monthName = d.toLocaleString("default",{
-
-        month:"long"
-
-    });
-
+    const monthName = d.toLocaleString("default", { month: "long" });
     const year = d.getFullYear();
-
-    const existing = getSalaryRecord(staffId,payrollMonth);
+    const existing = getSalaryRecord(staffId, payrollMonth);
 
     const payload = {
-
         staff_id: staffId,
-
         payroll_month: monthName,
-
         payroll_year: year,
-
         basic_salary: base,
-
         advance_deduction: advance,
-
         bonus: bonus,
-
         deduction: deductions,
-
         net_salary: net,
-
         payment_date: todayStr(),
-
         payment_mode: staff.paymentMode,
-
-        status:"Paid",
-
-        notes:""
-
+        status: "Paid",
+        notes: ""
     };
 
-    try{
+    try {
+        // Use dynamic API_BASE here
+        const url = existing ? `${API_BASE}/payroll/${existing.id}` : `${API_BASE}/payroll`;
+        const method = existing ? "PUT" : "POST";
 
-        if(existing){
+        await fetch(url, {
+            method: method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
 
-            await fetch(
-
-                `http://localhost:3000/api/payroll/${existing.id}`,
-
-                {
-
-                    method:"PUT",
-
-                    headers:{
-
-                        "Content-Type":"application/json"
-
-                    },
-
-                    body:JSON.stringify(payload)
-
-                }
-
-            );
-
-        }else{
-
-            await fetch(
-
-                "http://localhost:3000/api/payroll",
-
-                {
-
-                    method:"POST",
-
-                    headers:{
-
-                        "Content-Type":"application/json"
-
-                    },
-
-                    body:JSON.stringify(payload)
-
-                }
-
-            );
-
-        }
-
-        const response = await fetch(
-
-            "http://localhost:3000/api/payroll"
-
-        );
-
+        // Fetch updated payroll data
+        const response = await fetch(`${API_BASE}/payroll`);
         DB.payroll = await response.json();
 
         toast("Salary Paid");
-
         renderPayroll();
-
-    }
-
-    catch(err){
-
+    } catch (err) {
         console.error(err);
-
         alert("Unable to save payroll.");
-
     }
-
 }
 
 function unpaySalary(staffId){
